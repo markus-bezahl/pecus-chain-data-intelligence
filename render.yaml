@@ -10,13 +10,12 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.0
 
+staticSites:
   # React Frontend
-  - type: static
-    name: pecus-frontend
-    env: static
+  - name: pecus-frontend
     rootDir: frontend
     buildCommand: npm install && npm run build
-    staticPublishPath: ./dist
+    staticPublishPath: dist
     routes:
       - type: rewrite
         source: /*

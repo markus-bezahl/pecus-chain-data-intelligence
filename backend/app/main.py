@@ -186,6 +186,13 @@ def ingest_data(payload: IngestPayload, background_tasks: BackgroundTasks, db: C
             db.table("DELPRO_history_milk_diversion_info").upsert(jsonable_encoder(records)).execute()
             status_report["history_milk_diversion_info"] = len(records)
 
+        # 6. Ingest History Animals
+        if payload.history_animals:
+            records = [item.dict() for item in payload.history_animals]
+            for r in records: r["farm_id"] = payload.farm_id
+            db.table("DELPRO_history_animals").upsert(jsonable_encoder(records)).execute()
+            status_report["history_animals"] = len(records)
+
         # --- Trigger Background Prediction ---
         # Only if we have new sessions and the model is loaded
         if sessions_oids and "mastitis" in ml_models:

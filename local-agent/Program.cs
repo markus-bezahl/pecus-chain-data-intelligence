@@ -272,6 +272,7 @@ public class SyncWorker : BackgroundService
         if (IsMockMode(connStr)) return FetchMockIncrementalBatch(farmId, lastSessionOid); // Reuse mock logic
 
         var animals = new List<DelproBasicAnimal>();
+        var historyAnimals = new List<DelproHistoryAnimal>();
         var lactations = new List<DelproAnimalsLactationsSummary>();
         var sessions = new List<DelproSessionsMilkYield>();
         var voluntary = new List<DelproVoluntarySessionsMilkYield>();
@@ -299,6 +300,31 @@ public class SyncWorker : BackgroundService
                     cmd.Parameters.AddWithValue("@LastAnimalOID", lastAnimalOid);
                     using var r = cmd.ExecuteReader();
                     while (r.Read()) { animals.Add(MapAnimal(r)); }
+                }
+
+                // 1.1 HISTORY ANIMALS (Triggered by new BasicAnimals)
+                if (animals.Any())
+                {
+                    try 
+                    {
+                        var newOids = animals.Select(a => a.OID).ToList();
+                        var oidsStr = string.Join(",", newOids);
+                        
+                        var sqlHistory = $@"
+                            SELECT * FROM [{databaseName}].[dbo].[HistoryAnimal] 
+                            WHERE ReferenceID IN ({oidsStr})";
+
+                        using (var cmdHist = new SqlCommand(sqlHistory, conn))
+                        {
+                            using var rHist = cmdHist.ExecuteReader();
+                            while (rHist.Read()) { historyAnimals.Add(MapHistoryAnimal(rHist)); }
+                        }
+                        _logger.LogInformation("Fetched {Count} HistoryAnimal records for {AnimCount} new animals.", historyAnimals.Count, animals.Count);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Failed to fetch HistoryAnimal (Table might not exist?): {Msg}", ex.Message);
+                    }
                 }
             }
             catch (Exception ex) 
@@ -423,7 +449,7 @@ public class SyncWorker : BackgroundService
         }
         catch (Exception ex) { _logger.LogError(ex, "SQL Connection/Critical Error"); } 
 
-        return new IngestPayload(farmId, animals, lactations, sessions, voluntary, diversions);
+        return new IngestPayload(farmId, animals, lactations, sessions, voluntary, diversions, historyAnimals);
     }
 
     private bool IsMockMode(string? connStr) => string.IsNullOrEmpty(connStr) || connStr.Contains("Placeholder");
@@ -632,14 +658,14 @@ public class SyncWorker : BackgroundService
                 Imported: false, Exported: false, WeightIncreaseDecreaseStatus: "Stable"
             ));
         }
-        return new IngestPayload(farmId, animals, [], [], [], []);
+        return new IngestPayload(farmId, animals, [], [], [], [], []);
     }
 
     private IngestPayload FetchMockIncrementalBatch(string farmId, long lastOid)
     {
         var sessions = new List<DelproSessionsMilkYield>();
         var rnd = new Random();
-        if (rnd.Next(0, 10) < 3) return new IngestPayload(farmId, [], [], [], [], []);
+        if (rnd.Next(0, 10) < 3) return new IngestPayload(farmId, [], [], [], [], [], []);
 
         long startOid = lastOid + 1;
         for(int i=0; i<3; i++) {
@@ -658,7 +684,7 @@ public class SyncWorker : BackgroundService
                 AverageBlood: 0m, MaxBlood: 0m, ModifiedSource: 0, SampleTube: 0, SampleTubeRack: 0, SampleTubePosition: 0, ObjectType: 1
             ));
         }
-        return new IngestPayload(farmId, [], [], sessions, [], []);
+        return new IngestPayload(farmId, [], [], sessions, [], [], []);
     }
 }
 
@@ -843,7 +869,8 @@ public record IngestPayload(
     List<DelproAnimalsLactationsSummary> lactations_summary,
     List<DelproSessionsMilkYield> sessions_milk_yield,
     List<DelproVoluntarySessionsMilkYield> voluntary_sessions_milk_yield,
-    List<DelproHistoryMilkDiversionInfo> history_milk_diversion_info
+    List<DelproHistoryMilkDiversionInfo> history_milk_diversion_info,
+    List<DelproHistoryAnimal> history_animals
 );
 
 public record SyncStatusResponse(long last_oid, long last_animal_oid, long last_lactation_oid, long last_history_milk_diversion_oid);

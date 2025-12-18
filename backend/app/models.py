@@ -183,6 +183,13 @@ class DelproHistoryMilkDiversionInfo(BaseModel):
     DiversionCost: Optional[float] = None
     farm_id: Optional[UUID] = None
 
+# --- 6. History Animal ---
+class DelproHistoryAnimal(BaseModel):
+    OID: int
+    ReferenceID: int # Matches BasicAnimal.OID
+    SystemEntryTimeStamp: Optional[datetime] = None
+    farm_id: Optional[UUID] = None
+
 # --- Ingest Models ---
 class IngestPayload(BaseModel):
     farm_id: str # Farm ID
@@ -191,6 +198,7 @@ class IngestPayload(BaseModel):
     sessions_milk_yield: List[DelproSessionsMilkYield] = []
     voluntary_sessions_milk_yield: List[DelproVoluntarySessionsMilkYield] = []
     history_milk_diversion_info: List[DelproHistoryMilkDiversionInfo] = []
+    history_animals: List[DelproHistoryAnimal] = []
 
 class SyncStatusResponse(BaseModel):
     last_oid: int # Used for sessions watermark

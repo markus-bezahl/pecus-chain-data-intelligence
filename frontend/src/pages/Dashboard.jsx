@@ -155,11 +155,9 @@ export default function Dashboard() {
     <div className="min-h-screen bg-[#fdfbf7] flex flex-col">
       {/* Top Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center sticky top-0 z-20 shadow-sm">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-             <img src="static/logo_qr.svg" alt="Logo" className="h-8 w-8" />
-             <img src="static/name.svg" alt="Pecus Chain" className="h-6 w-auto hidden md:block" />
-          </div>
+        <div className="flex items-center gap-3">
+          <img src="/logo_qr.svg" alt="Logo" className="h-10 w-auto" />
+          <span className="text-xl font-bold text-[#3a352f] hidden md:inline">Pecus Chain</span>
         </div>
         
         <div className="flex items-center gap-6">

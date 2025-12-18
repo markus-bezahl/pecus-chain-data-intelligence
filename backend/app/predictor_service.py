@@ -5,13 +5,16 @@ from supabase import Client
 import joblib
 # Try importing the probability service, handling both module and script execution contexts
 try:
-    from backend.app.probability_service import calculate_mastitis_probability
+    from .probability_service import calculate_mastitis_probability
 except ImportError:
     try:
-        from probability_service import calculate_mastitis_probability
+        from app.probability_service import calculate_mastitis_probability
     except ImportError:
-        print("Warning: Could not import probability_service. Probability calculation will be skipped.")
-        def calculate_mastitis_probability(db, c, p): return None
+        try:
+            from backend.app.probability_service import calculate_mastitis_probability
+        except ImportError:
+            print("Warning: Could not import probability_service. Probability calculation will be skipped.")
+            def calculate_mastitis_probability(db, c, p): return None
 
 def process_mdi_predictions(
     db: Client, 

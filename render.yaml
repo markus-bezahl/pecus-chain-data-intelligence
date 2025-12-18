@@ -18,9 +18,8 @@ services:
 
   # React Frontend (Served as a Node Web Service)
   # Usiamo 'web' invece di 'staticSites' per massima compatibilità con i Blueprints
-  - type: static
+  - type: static_site
     name: pecus-frontend
-    env: static
     rootDir: frontend
     region: frankfurt
     buildCommand: npm install && npm run build

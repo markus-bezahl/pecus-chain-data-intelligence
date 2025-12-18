@@ -16,25 +16,4 @@ services:
       - key: SUPABASE_KEY
         sync: false
 
-  # React Frontend (Served as a Node Web Service)
-  # Usiamo 'web' invece di 'staticSites' per massima compatibilità con i Blueprints
-  - type: static_site
-    name: pecus-frontend
-    rootDir: frontend
-    region: frankfurt
-    buildCommand: npm install && npm run build
-    staticPublishPath: dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: NODE_VERSION
-        value: 20.11.0
-      - key: VITE_SUPABASE_URL
-        sync: false
-      - key: VITE_SUPABASE_ANON_KEY
-        sync: false
-      - key: VITE_API_URL
-        sync: false
 

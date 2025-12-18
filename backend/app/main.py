@@ -38,7 +38,7 @@ app = FastAPI(title="Pecus Chain API", lifespan=lifespan)
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"], # Add frontend URL
+    allow_origins=["*"], # Allow all origins for Vercel deployment
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

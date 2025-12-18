@@ -45,8 +45,8 @@ export default function Auth() {
 
       {/* Logo Section */}
       <div className="mb-8 flex flex-col items-center gap-2">
-        <img src="static/logo_qr.svg" alt="Pecus Chain Logo" className="h-30 w-auto" />
-        <img src="static/name.svg" alt="PECUS CHAIN" className="h-13 w-auto" />
+        <img src="/logo_qr.svg" alt="Pecus Chain Logo" className="h-30 w-auto" />
+        <img src="/name.svg" alt="PECUS CHAIN" className="h-13 w-auto" />
       </div>
 
       {/* Login Card */}

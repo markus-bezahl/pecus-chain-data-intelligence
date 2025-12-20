@@ -6,9 +6,12 @@ from twilio.rest import Client
 
 router = APIRouter(prefix="/api/notifications", tags=["Notifications"])
 
-class WhatsappNotificationRequest(BaseModel):
-    message: str
-    timestamp: Optional[str] = None
+class SupabaseWebhookPayload(BaseModel):
+    type: str
+    table: str
+    record: dict
+    schema: str
+    old_record: Optional[dict] = None
 
 @router.post("/whatsapp")
 async def send_whatsapp_notification(request: WhatsappNotificationRequest):

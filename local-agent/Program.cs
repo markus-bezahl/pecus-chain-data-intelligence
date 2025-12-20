@@ -4,11 +4,23 @@ using Microsoft.Extensions.Logging;
 using System.Net.Http.Json;
 using Microsoft.Data.SqlClient; // Correct namespace for .NET 8
 using System.Text.Json; // Added for JSON config handling
+using Serilog; // Added Serilog
 
 using System.Runtime.InteropServices; // Added for OS detection
 
 // --- ENTRY POINT ---
+// Setup Serilog first
+var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "log.txt");
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .WriteTo.File(logPath, rollingInterval: RollingInterval.Day, retainedFileCountLimit: 7)
+    .CreateLogger();
+
 var builder = Host.CreateApplicationBuilder(args);
+
+// Use Serilog
+builder.Logging.ClearProviders();
+builder.Logging.AddSerilog();
 
 // FORCE LOADING ENV VARS
 builder.Configuration.AddEnvironmentVariables();
@@ -46,9 +58,14 @@ public class SyncWorker : BackgroundService
         _logger = logger;
         _configuration = configuration;
 
-        // Manually resolve URL
-        var url = _configuration["API_BASE_URL"];
+        // Load config from file first
+        var config = LoadConfig();
+        var url = config?.ApiBaseUrl;
+
+        // Fallback to Env Var or Default
+        if (string.IsNullOrEmpty(url)) url = _configuration["API_BASE_URL"];
         if (string.IsNullOrEmpty(url)) url = "http://host.docker.internal:8000";
+        
         url = url.Replace("\"", "").Replace("'", "").Trim();
         _apiBaseUrl = url;
     }
@@ -142,13 +159,19 @@ public class SyncWorker : BackgroundService
         }
     }
 
+    private string GetConfigPath()
+    {
+        return Path.Combine(AppContext.BaseDirectory, ConfigFileName);
+    }
+
     private AgentConfig? LoadConfig()
     {
         try
         {
-            if (File.Exists(ConfigFileName))
+            var path = GetConfigPath();
+            if (File.Exists(path))
             {
-                var json = File.ReadAllText(ConfigFileName);
+                var json = File.ReadAllText(path);
                 return JsonSerializer.Deserialize<AgentConfig>(json);
             }
         }
@@ -179,10 +202,12 @@ public class SyncWorker : BackgroundService
     {
         try
         {
-            var config = new AgentConfig { FarmId = farmId };
-            var json = JsonSerializer.Serialize(config);
-            File.WriteAllText(ConfigFileName, json);
-            _logger.LogInformation("Saved Farm ID to {File}", ConfigFileName);
+            var config = LoadConfig() ?? new AgentConfig();
+            config.FarmId = farmId;
+            var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+            var path = GetConfigPath();
+            File.WriteAllText(path, json);
+            _logger.LogInformation("Saved Farm ID to {File}", path);
         }
         catch (Exception ex) { _logger.LogError("Failed to save config file: {Msg}", ex.Message); }
     }
@@ -250,6 +275,12 @@ public class SyncWorker : BackgroundService
     // --- DATA FETCHING ---
     private string GetConnectionString(string databaseName = "DelPro")
     {
+        // 1. Try Config File
+        var config = LoadConfig();
+        if (!string.IsNullOrEmpty(config?.DatabaseConnectionString)) 
+            return config.DatabaseConnectionString;
+
+        // 2. Try Env Var / AppSettings
         var connStr = _configuration.GetConnectionString("DelProDb");
         
         // If explicitly configured (e.g. Docker env var), use it.
@@ -287,17 +318,18 @@ public class SyncWorker : BackgroundService
             try 
             {
                 // Logic: (ExitDate IS NULL) OR (ExitDate > 1 Year Ago)
-                var oneYearAgo = DateTime.Now.AddYears(-1).ToString("yyyy-MM-dd");
+                var oneYearAgo = DateTime.Now.AddYears(-1);
                 
                 var sqlAnimals = $@"
                     SELECT TOP 2000 * FROM [{databaseName}].[dbo].[BasicAnimal] 
-                    WHERE (ExitDate IS NULL OR ExitDate > '{oneYearAgo}') 
+                    WHERE (ExitDate IS NULL OR ExitDate > @OneYearAgo) 
                     AND OID > @LastAnimalOID 
                     ORDER BY OID ASC";
                 
                 using (var cmd = new SqlCommand(sqlAnimals, conn))
                 {
                     cmd.Parameters.AddWithValue("@LastAnimalOID", lastAnimalOid);
+                    cmd.Parameters.AddWithValue("@OneYearAgo", oneYearAgo);
                     using var r = cmd.ExecuteReader();
                     while (r.Read()) { animals.Add(MapAnimal(r)); }
                 }
@@ -335,18 +367,19 @@ public class SyncWorker : BackgroundService
             // 2. LACTATIONS
             try 
             {
-                var oneYearAgo = DateTime.Now.AddYears(-1).ToString("yyyy-MM-dd");
+                var oneYearAgo = DateTime.Now.AddYears(-1);
                 var sqlLact = $@"
                     SELECT TOP 2000 L.* 
                     FROM [{databaseName}].[dbo].[AnimalLactationSummary] L
                     JOIN [{databaseName}].[dbo].[BasicAnimal] A ON L.Animal = A.OID
-                    WHERE (A.ExitDate IS NULL OR A.ExitDate > '{oneYearAgo}')
+                    WHERE (A.ExitDate IS NULL OR A.ExitDate > @OneYearAgo)
                     AND L.OID > @LastLactationOID
                     ORDER BY L.OID ASC";
                     
                 using (var cmd = new SqlCommand(sqlLact, conn))
                 {
                     cmd.Parameters.AddWithValue("@LastLactationOID", lastLactationOid);
+                    cmd.Parameters.AddWithValue("@OneYearAgo", oneYearAgo);
                     using var r = cmd.ExecuteReader();
                     while (r.Read()) { lactations.Add(MapLactation(r)); }
                 }
@@ -359,27 +392,29 @@ public class SyncWorker : BackgroundService
             // 3. SESSIONS (Normal)
             try
             {
-                var oneYearAgo = DateTime.Now.AddYears(-1).ToString("yyyy-MM-dd");
-                var fallbackDate = "2018-09-11";
+                var oneYearAgo = DateTime.Now.AddYears(-1);
+                var fallbackDate = new DateTime(2018, 9, 11);
                 string sqlSessions;
+                DateTime startDate = fallbackDate;
                 
                 if (lastSessionOid == 0)
                 {
-                    var checkSql = $"SELECT TOP 1 1 FROM [{databaseName}].[dbo].[SessionMilkYield] WHERE BeginTime > '{oneYearAgo}'";
+                    var checkSql = $"SELECT TOP 1 1 FROM [{databaseName}].[dbo].[SessionMilkYield] WHERE BeginTime > @CheckDate";
                     bool hasRecentData = false;
                     try {
                         using (var checkCmd = new SqlCommand(checkSql, conn))
                         {
+                            checkCmd.Parameters.AddWithValue("@CheckDate", oneYearAgo);
                             hasRecentData = checkCmd.ExecuteScalar() != null;
                         }
                     } catch {}
 
-                    var startDate = hasRecentData ? oneYearAgo : fallbackDate;
+                    startDate = hasRecentData ? oneYearAgo : fallbackDate;
                     _logger.LogInformation("Session Sync Strategy: First Run. Starting from {Date} (HasRecentData: {Has})", startDate, hasRecentData);
 
                     sqlSessions = $@"
                         SELECT TOP 2000 * FROM [{databaseName}].[dbo].[SessionMilkYield] 
-                        WHERE BeginTime > '{startDate}' 
+                        WHERE BeginTime > @StartDate 
                         ORDER BY OID ASC";
                 }
                 else
@@ -389,7 +424,11 @@ public class SyncWorker : BackgroundService
 
                 using (var cmd = new SqlCommand(sqlSessions, conn))
                 {
-                    if (lastSessionOid > 0) cmd.Parameters.AddWithValue("@LastSessionOID", lastSessionOid);
+                    if (lastSessionOid > 0) 
+                        cmd.Parameters.AddWithValue("@LastSessionOID", lastSessionOid);
+                    else
+                        cmd.Parameters.AddWithValue("@StartDate", startDate);
+
                     using var r = cmd.ExecuteReader();
                     while (r.Read()) { sessions.Add(MapSession(r)); }
                 }
@@ -463,6 +502,13 @@ public class SyncWorker : BackgroundService
     private bool? ToBool(object val) => (val == DBNull.Value || val == null) ? null : Convert.ToBoolean(val);
     private DateTime? ToDateTime(object val) => (val == DBNull.Value || val == null) ? null : Convert.ToDateTime(val);
     private string? ToString(object val) => (val == DBNull.Value || val == null) ? null : val.ToString();
+    private Guid? ToGuid(object val) 
+    {
+        if (val == DBNull.Value || val == null) return null;
+        if (val is Guid g) return g;
+        if (Guid.TryParse(val.ToString(), out Guid parsed)) return parsed;
+        return null;
+    }
 
     private DelproBasicAnimal MapAnimal(SqlDataReader r) => new DelproBasicAnimal(
         OID: Convert.ToInt64(r["OID"]),
@@ -532,7 +578,7 @@ public class SyncWorker : BackgroundService
         Destination: ToShort(r["Destination"]),
         User: ToString(r["User"]),
         ExpectedYield: ToDecimal(r["ExpectedYield"]),
-        ObjectGuid: (r["ObjectGuid"] == DBNull.Value) ? null : (Guid?)r["ObjectGuid"],
+        ObjectGuid: ToGuid(r["ObjectGuid"]),
         BeginTime: ToDateTime(r["BeginTime"]),
         BasicAnimal: ToLong(r["BasicAnimal"]),
         AnimalDaily: ToLong(r["AnimalDaily"]),
@@ -551,6 +597,12 @@ public class SyncWorker : BackgroundService
         SampleTubePosition: ToShort(r["SampleTubePosition"]),
         ObjectType: ToShort(r["ObjectType"]),
         OID: ToLong(r["OID"]),
+        SystemEntryTimeStamp: ToDateTime(r["SystemEntryTimeStamp"])
+    );
+
+    private DelproHistoryAnimal MapHistoryAnimal(SqlDataReader r) => new DelproHistoryAnimal(
+        OID: Convert.ToInt64(r["OID"]),
+        ReferenceID: Convert.ToInt64(r["ReferenceID"]),
         SystemEntryTimeStamp: ToDateTime(r["SystemEntryTimeStamp"])
     );
 
@@ -658,14 +710,14 @@ public class SyncWorker : BackgroundService
                 Imported: false, Exported: false, WeightIncreaseDecreaseStatus: "Stable"
             ));
         }
-        return new IngestPayload(farmId, animals, [], [], [], [], []);
+        return new IngestPayload(farmId, animals, new List<DelproAnimalsLactationsSummary>(), new List<DelproSessionsMilkYield>(), new List<DelproVoluntarySessionsMilkYield>(), new List<DelproHistoryMilkDiversionInfo>(), new List<DelproHistoryAnimal>());
     }
 
     private IngestPayload FetchMockIncrementalBatch(string farmId, long lastOid)
     {
         var sessions = new List<DelproSessionsMilkYield>();
         var rnd = new Random();
-        if (rnd.Next(0, 10) < 3) return new IngestPayload(farmId, [], [], [], [], [], []);
+        if (rnd.Next(0, 10) < 3) return new IngestPayload(farmId, new List<DelproBasicAnimal>(), new List<DelproAnimalsLactationsSummary>(), new List<DelproSessionsMilkYield>(), new List<DelproVoluntarySessionsMilkYield>(), new List<DelproHistoryMilkDiversionInfo>(), new List<DelproHistoryAnimal>());
 
         long startOid = lastOid + 1;
         for(int i=0; i<3; i++) {
@@ -684,7 +736,7 @@ public class SyncWorker : BackgroundService
                 AverageBlood: 0m, MaxBlood: 0m, ModifiedSource: 0, SampleTube: 0, SampleTubeRack: 0, SampleTubePosition: 0, ObjectType: 1
             ));
         }
-        return new IngestPayload(farmId, [], [], sessions, [], [], []);
+        return new IngestPayload(farmId, new List<DelproBasicAnimal>(), new List<DelproAnimalsLactationsSummary>(), sessions, new List<DelproVoluntarySessionsMilkYield>(), new List<DelproHistoryMilkDiversionInfo>(), new List<DelproHistoryAnimal>());
     }
 }
 
@@ -856,10 +908,18 @@ public record DelproHistoryMilkDiversionInfo(
     decimal? DiversionCost
 );
 
+public record DelproHistoryAnimal(
+    long OID,
+    long ReferenceID,
+    DateTime? SystemEntryTimeStamp
+);
+
 public class AgentConfig
 {
     public string? FarmId { get; set; }
+    public string? ApiBaseUrl { get; set; } = "http://localhost:8000";
     public string? DatabaseName { get; set; } = "DelPro";
+    public string? DatabaseConnectionString { get; set; }
     public int PollingIntervalSeconds { get; set; } = 1800; // Default 30 min
 }
 

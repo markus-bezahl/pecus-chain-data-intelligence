@@ -64,3 +64,6 @@ Dockerfile
 sql-server-scripts/
 backend/data_manipulation_scripts/
 backend/supabase_scripts/
+
+# Builds
+publish*/

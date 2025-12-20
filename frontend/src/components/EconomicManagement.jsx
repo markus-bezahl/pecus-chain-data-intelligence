@@ -35,29 +35,9 @@ export default function EconomicManagement({ user, settings }) {
       setLoading(true);
       setError(null);
       
-      // 1. Get Farm ID
-      let farmId = null;
+      // 1. Farm ID (Optional / All)
+      const farmId = null; // Get All Farms
       
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("farm_id")
-        .eq("id", user.id)
-        .single();
-        
-      if (profile?.farm_id) {
-          farmId = profile.farm_id;
-      } else {
-          // Fallback: Try to get farm_id from animal_statistics
-          const { data: animalStat } = await supabase.from("animal_statistics").select("farm_id").limit(1);
-          if (animalStat?.[0]?.farm_id) {
-             farmId = animalStat[0].farm_id;
-          }
-      }
-
-      if (!farmId) {
-          return;
-      }
-
       // 2. Determine Date Range
       let startDate = null;
       let endDate = null;

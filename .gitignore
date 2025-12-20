@@ -67,3 +67,6 @@ backend/supabase_scripts/
 
 # Builds
 publish*/
+
+# Folders
+backend/supabase_functions/

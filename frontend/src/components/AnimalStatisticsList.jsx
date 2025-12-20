@@ -34,9 +34,14 @@ export default function AnimalStatisticsList({ user, settings }) {
 
   async function fetchDashboardMetrics() {
       try {
+          // 0. Farm ID is optional now (backend defaults to all farms if null)
+          // We can pass specific farm_id if we have a selector, otherwise null for "All"
+          
           // 1. Total Animals in animal_statistics (Animals milked in last year)
           // We can use the RPC for this now
-          const { data: metrics, error: rpcError } = await supabase.rpc('get_animal_stats_dashboard_metrics');
+          const { data: metrics, error: rpcError } = await supabase.rpc('get_animal_stats_dashboard_metrics', {
+              p_farm_id: null // Explicitly requesting ALL farms
+          });
           if (!rpcError && metrics) {
               setActiveAnimals(metrics.active_milking);
               setTotalAnimalsInStats(metrics.total_in_stats);
@@ -48,7 +53,7 @@ export default function AnimalStatisticsList({ user, settings }) {
           }
 
           // 2. Average Production (1 Year)
-          const { data: avgProd, error: avgError } = await supabase.rpc('get_animal_stats_daily_avg');
+          const { data: avgProd, error: avgError } = await supabase.rpc('get_animal_stats_daily_avg'); // Note: This one might also need update if it exists
           if (!avgError) setAvgProduction(avgProd);
 
       } catch (err) {
@@ -60,20 +65,18 @@ export default function AnimalStatisticsList({ user, settings }) {
     try {
       setLoading(true);
       
-      // 1. Get Farm ID
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("farm_id")
-        .eq("id", user.id)
-        .single();
-
-      if (!profile?.farm_id) return;
+      // 0. Farm ID (Optional)
+      // We pass null to get ALL farms
+      const farmId = null;
 
       const { data: result, error } = await supabase.rpc("get_active_animals_stats", {
-          p_farm_id: profile.farm_id
+          p_farm_id: farmId
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error("Error fetching active animals stats RPC:", error);
+        throw error;
+      }
 
       setData(result || []);
 
@@ -88,10 +91,10 @@ export default function AnimalStatisticsList({ user, settings }) {
   const filteredAndSortedData = useMemo(() => {
     let processedData = [...data];
 
-    // 1. Search
+    // 1. Search (Only by animal_number)
     if (searchTerm) {
       processedData = processedData.filter(row => 
-        row.animal_oid && row.animal_oid.toString().includes(searchTerm)
+        row.animal_number && row.animal_number.toString().includes(searchTerm)
       );
     }
 
@@ -251,11 +254,11 @@ export default function AnimalStatisticsList({ user, settings }) {
            </div>
         ) : (
            <div className="grid grid-cols-1 gap-4">
-              {paginatedData.map((cow) => (
+              {paginatedData.map((animal) => (
                  <div 
-                    key={cow.animal_oid} 
+                    key={animal.animal_oid} 
                     onClick={() => {
-                        setSelectedAnimal(cow);
+                        setSelectedAnimal(animal);
                         setIsDetailModalOpen(true);
                     }}
                     className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row items-center gap-6 cursor-pointer group"
@@ -265,17 +268,18 @@ export default function AnimalStatisticsList({ user, settings }) {
                     <div className="flex flex-col md:flex-row items-center gap-8 w-full md:w-auto border-b md:border-b-0 md:border-r border-gray-100 pb-4 md:pb-0 md:pr-6">
                         <div className="flex flex-col items-center">
                             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">{t('dashboard.card.id')}</span>
-                            <span className="text-2xl font-bold text-[#1B4B66]">{cow.animal_oid}</span>
+                            {/* Display Animal Number (Visual Tag) instead of OID if available */}
+                            <span className="text-2xl font-bold text-[#1B4B66]">{animal.animal_number || animal.animal_oid}</span>
                         </div>
                         <div className="w-px h-8 bg-gray-100 hidden md:block"></div>
                         <div className="flex flex-col items-center">
                             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">{t('dashboard.card.lactation')}</span>
-                            <span className="text-xl font-bold text-gray-700">{cow.lactation_number}</span>
+                            <span className="text-xl font-bold text-gray-700">{animal.lactation_number}</span>
                         </div>
                         <div className="w-px h-8 bg-gray-100 hidden md:block"></div>
                         <div className="flex flex-col items-center">
                             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">{t('dashboard.card.dim')}</span>
-                            <span className="text-xl font-bold text-gray-700">{cow.dim}</span>
+                            <span className="text-xl font-bold text-gray-700">{animal.dim}</span>
                         </div>
                     </div>
 
@@ -286,7 +290,7 @@ export default function AnimalStatisticsList({ user, settings }) {
                              <span className="text-[10px] text-gray-400 uppercase font-semibold mb-1">{t('stats.production_value')}</span>
                              <span className="text-lg font-bold text-[#3a352f]">
                                  {new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(
-                                     ((cow.annual_total_yield || 0) - (cow.annual_diverted_milk || 0)) * (settings.milkPrice || 0)
+                                     ((animal.annual_total_yield || 0) - (animal.annual_diverted_milk || 0)) * (settings.milkPrice || 0)
                                  )}
                              </span>
                          </div>
@@ -296,8 +300,8 @@ export default function AnimalStatisticsList({ user, settings }) {
                              <span className="text-[10px] text-gray-400 uppercase font-semibold mb-1">{t('stats.feed_cost')}</span>
                              <span className="text-lg font-bold text-[#3a352f]">
                                  {new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(
-                                     ((cow.annual_dry_days || 0) * (settings.dryRation || 0) * (settings.costSS || 0)) + 
-                                     ((cow.annual_milking_days || 0) * (settings.lactationRation || 0) * (settings.costSS || 0))
+                                     ((animal.annual_dry_days || 0) * (settings.dryRation || 0) * (settings.costSS || 0)) + 
+                                     ((animal.annual_milking_days || 0) * (settings.lactationRation || 0) * (settings.costSS || 0))
                                  )}
                              </span>
                          </div>
@@ -307,9 +311,9 @@ export default function AnimalStatisticsList({ user, settings }) {
                              <span className="text-[10px] text-[#8c7355] uppercase font-bold mb-1">IOFC</span>
                              <span className="text-lg font-bold text-[#3a352f]">
                                  {new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(
-                                     (((cow.annual_total_yield || 0) - (cow.annual_diverted_milk || 0)) * (settings.milkPrice || 0)) - 
-                                     (((cow.annual_dry_days || 0) * (settings.dryRation || 0) * (settings.costSS || 0)) + 
-                                      ((cow.annual_milking_days || 0) * (settings.lactationRation || 0) * (settings.costSS || 0)))
+                                     (((animal.annual_total_yield || 0) - (animal.annual_diverted_milk || 0)) * (settings.milkPrice || 0)) - 
+                                     (((animal.annual_dry_days || 0) * (settings.dryRation || 0) * (settings.costSS || 0)) + 
+                                      ((animal.annual_milking_days || 0) * (settings.lactationRation || 0) * (settings.costSS || 0)))
                                  )}
                              </span>
                          </div>

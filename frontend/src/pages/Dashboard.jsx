@@ -77,6 +77,9 @@ export default function Dashboard() {
     try {
       setLoading(true);
       
+      // 0. Farm ID is Optional (null = All)
+      // We remove the profile fetch loop
+         
       // Calculate date range: today-1 to today
       const today = new Date();
       const yesterday = new Date(today);
@@ -95,13 +98,15 @@ export default function Dashboard() {
 
       // Prepare RPC parameters
       let params = {
+          p_farm_id: null, // ALL FARMS
           p_start_date: startDate,
           p_end_date: endDate,
           p_min_mdi: filterType === 'attention' ? settings.attention : (filterType === 'alert' ? settings.alert : null),
           p_page: page,
           p_page_size: pageSize,
           p_sort_col: orderColumn,
-          p_sort_dir: orderAscending
+          p_sort_dir: orderAscending,
+          p_search_term: searchTerm // Pass search term to backend
       };
 
       // Call RPC
@@ -147,8 +152,9 @@ export default function Dashboard() {
     await supabase.auth.signOut();
   };
 
+  // Client-side filtering is no longer primary, but we keep it for fallback data
   const filteredData = data.filter((row) =>
-    row.animal_oid.toString().includes(searchTerm)
+     !searchTerm || (row.animal_number || row.animal_oid).toString().includes(searchTerm)
   );
 
   return (
@@ -339,7 +345,7 @@ export default function Dashboard() {
                                 <div className="flex items-center gap-6 border border-gray-100 rounded-xl p-4 bg-white min-w-[300px]">
                                     <div className="flex flex-col items-center border-r border-gray-100 pr-6">
                                         <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">{t('dashboard.card.id')}</p>
-                                        <p className="text-2xl font-bold text-[#1B4B66]">{row.animal_oid}</p>
+                                        <p className="text-2xl font-bold text-[#1B4B66]">{row.animal_number || row.animal_oid}</p>
                                     </div>
                                     <div className="flex flex-col items-center border-r border-gray-100 pr-6">
                                         <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">{t('dashboard.card.lactation')}</p>

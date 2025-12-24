@@ -10,8 +10,15 @@ class SupabaseWebhookPayload(BaseModel):
     type: str
     table: str
     record: dict
-    schema: str
+    schema_name: str
     old_record: Optional[dict] = None
+
+    class Config:
+        fields = {'schema_name': 'schema'}
+
+class WhatsappNotificationRequest(BaseModel):
+    message: str
+    timestamp: Optional[str] = None
 
 @router.post("/whatsapp")
 async def send_whatsapp_notification(request: WhatsappNotificationRequest):

@@ -92,6 +92,8 @@ def register_farm(request: FarmRegistrationRequest, db: Client = Depends(get_sup
 @app.get("/api/sync/status", response_model=SyncStatusResponse)
 def get_sync_status(farm_id: str, db: Client = Depends(get_supabase_client)):
     try:
+        print(f"[SyncStatus] Request received for farm_id: {farm_id}")
+
         # 1. Get Max OID for Sessions
         res_sessions = db.table("DELPRO_sessions_milk_yield")\
             .select("OID")\
@@ -128,14 +130,19 @@ def get_sync_status(farm_id: str, db: Client = Depends(get_supabase_client)):
             .execute()
         last_history_milk_diversion_oid = res_history_milk_diversion.data[0]["OID"] if res_history_milk_diversion.data else 0
         
-        return {
+        response_data = {
             "last_oid": last_oid,
             "last_animal_oid": last_animal_oid,
             "last_lactation_oid": last_lactation_oid,
             "last_history_milk_diversion_oid": last_history_milk_diversion_oid
         }
+
+        print(f"[SyncStatus] Returning OIDs for farm_id {farm_id}: {response_data}")
+
+        return response_data
         
     except Exception as e:
+        print(f"[SyncStatus] Error processing request for farm_id {farm_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # 2. Ingest Endpoint: Receive Data from Agent
